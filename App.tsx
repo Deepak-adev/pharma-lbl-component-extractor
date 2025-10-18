@@ -62,7 +62,7 @@ const App: React.FC = () => {
       }
 
       setProcessingMessage(`Analyzing ${allImages.length} images with AI...`);
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
       
       const analysisPromises = allImages.map((img, index) => 
         analyzeAndCategorizeImage(ai, img.base64, img.mimeType)
@@ -100,7 +100,7 @@ const App: React.FC = () => {
 
     try {
       const selectedComponents = components.filter(c => selectedComponentIds.includes(c.id));
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
       const variations = await generateLBLVariations(ai, selectedComponents, pageCount, brandKit ?? undefined);
       setLblVariations(variations);
       setAppState('variations_generated');
@@ -123,7 +123,7 @@ const App: React.FC = () => {
             .map(id => components.find(c => c.id === id))
             .filter((c): c is ImageComponent => c !== undefined);
 
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
+        const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
         const reconstructedImage = await reconstructLBLImage(ai, variationToReconstruct, componentsForVariation, currentPageCount, brandKit ?? undefined);
         
         setLblVariations(currentVariations => 

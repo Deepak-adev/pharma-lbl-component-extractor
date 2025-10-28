@@ -1,6 +1,10 @@
 import { GoogleGenAI, GenerateContentResponse, Type, Modality } from '@google/genai';
 import type { ImageComponent, ComponentCategory, LBLVariation, BrandKit } from '../types';
 import { componentCategories } from '../types';
+import { generateWithKandinsky, createPromptFromVariation } from './imageGenerationService';
+import { enhanceImage, generateHighQualityImage, generateWithSDXL } from './imageEnhancementService';
+import * as fs from "node:fs";
+
 
 const CATEGORIES: readonly ComponentCategory[] = componentCategories;
 
@@ -89,7 +93,7 @@ export const generateLBLVariations = async (ai: GoogleGenAI, components: ImageCo
 
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-pro',
+            model: 'gemini-2.5-flash',
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
@@ -127,74 +131,124 @@ export const reconstructLBLImage = async (
   pageCount: number,
   brandKit?: BrandKit
 ): Promise<string> => {
+  let generatedImage: string;
 
-  let brandInstructions = 'The design should be clean, modern, and professional.';
-  if (brandKit) {
-      brandInstructions = `
-      The design must adhere to strict brand guidelines:
-      - The primary brand color is ${brandKit.primaryColor}. Use it for headlines, key accents, and backgrounds where appropriate.
-      - The secondary brand color is ${brandKit.secondaryColor}. Use it for secondary elements, call-outs, or subtle highlights.
-      - The overall typography should be clean and professional, reflecting a font like ${brandKit.font}.
-      - The provided brand logo must be placed appropriately, usually at the top or bottom corner, to ensure brand presence.
-      `;
-  }
-
-  const parts: any[] = [
-    {
-      text: `You are a creative graphic designer for the Indian pharmaceutical industry. Your task is to create a single, cohesive image representing a multi-page LBL.
-      
-      Layout Concept: "${variation.title}"
-      Description: "${variation.description}"
-      Number of Pages: ${pageCount}
-
-      Arrange the following components logically and professionally onto a clean, modern, and aesthetically pleasing background to create the final LBL mockup. The components are provided in their intended order of appearance. Adhere to the layout description. 
-      
-      ${brandInstructions}
-
-      The final output should be a single, high-quality image that looks like a professional marketing asset, not a collage. Blend the components seamlessly.
-      `,
-    },
-  ];
-
-  if (brandKit?.logo) {
-    parts.push({
-      inlineData: {
-        data: brandKit.logo.base64,
-        mimeType: brandKit.logo.mimeType,
-      },
-    });
-    parts.push({ text: `This is the official Brand Logo. Incorporate it into the design.` });
-  }
-
-  components.forEach(component => {
-    parts.push({
-      inlineData: {
-        data: component.base64,
-        mimeType: component.mimeType,
-      },
-    });
-    parts.push({ text: `Component to include: ${component.name} (${component.category})` });
-  });
-
+  // Try multiple high-quality generation methods
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
-      contents: { parts },
-      config: {
-        responseModalities: [Modality.IMAGE],
-      },
-    });
+    // Method 1: Try Gemini first
+    try {
+      let brandInstructions = 'The design should be clean, modern, and professional.';
+      if (brandKit) {
+          brandInstructions = `
+          The design must adhere to strict brand guidelines:
+          - The primary brand color is ${brandKit.primaryColor}. Use it for headlines, key accents, and backgrounds where appropriate.
+          - The secondary brand color is ${brandKit.secondaryColor}. Use it for secondary elements, call-outs, or subtle highlights.
+          - The overall typography should be clean and professional, reflecting a font like ${brandKit.font}.
+          - The provided brand logo must be placed appropriately, usually at the top or bottom corner, to ensure brand presence.
+          `;
+      }
 
-    for (const part of response.candidates[0].content.parts) {
-      if (part.inlineData) {
-        return part.inlineData.data;
+      const parts: any[] = [
+        {
+          text: `Create a HIGH-QUALITY professional pharmaceutical Leave Behind Literature (LBL) design. This is a medical marketing brochure for doctors, NOT a poster or general advertisement.
+          
+          CRITICAL REQUIREMENTS:
+          - Medical/pharmaceutical industry standard layout
+          - Professional typography with medical credibility
+          - Clean white/light background with subtle medical blue accents
+          - Product information hierarchy: Brand name → Indication → Key benefits → Clinical data
+          - Regulatory compliance visual style
+          - Doctor-facing professional tone
+          - SHARP, HIGH-RESOLUTION, PROFESSIONAL QUALITY
+          
+          Layout: "${variation.title}"
+          Strategy: "${variation.description}"
+          Pages: ${pageCount}
+          
+          ${brandInstructions}
+          
+          Create a single composite image showing the LBL layout with pharmaceutical industry standards - clean, trustworthy, medical-grade design quality.`,
+        },
+      ];
+
+      if (brandKit?.logo) {
+        parts.push({
+          inlineData: {
+            data: brandKit.logo.base64,
+            mimeType: brandKit.logo.mimeType,
+          },
+        });
+        parts.push({ text: `This is the official Brand Logo. Incorporate it into the design.` });
+      }
+
+      components.forEach(component => {
+        parts.push({
+          inlineData: {
+            data: component.base64,
+            mimeType: component.mimeType,
+          },
+        });
+        parts.push({ text: `Component to include: ${component.name} (${component.category})` });
+      });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: { parts },
+        config: {
+          responseModalities: [Modality.IMAGE],
+        },
+      });
+
+      if (response.candidates?.[0]?.content?.parts) {
+        for (const part of response.candidates[0].content.parts) {
+          if (part.inlineData?.data) {
+            generatedImage = part.inlineData.data;
+            break;
+          }
+        }
+      }
+      
+      if (!generatedImage) {
+        throw new Error('No image data in Gemini response');
+      }
+
+    } catch (geminiError) {
+      console.warn('Gemini failed, trying SDXL:', geminiError);
+      
+      // Method 2: Try Stable Diffusion XL
+      try {
+        const prompt = createPromptFromVariation(variation, components, brandKit);
+        generatedImage = await generateWithSDXL(prompt);
+      } catch (sdxlError) {
+        console.warn('SDXL failed, trying enhanced FLUX:', sdxlError);
+        
+        // Method 3: Try enhanced FLUX.1-dev
+        try {
+          const prompt = createPromptFromVariation(variation, components, brandKit);
+          generatedImage = await generateHighQualityImage(prompt, 1024, 768);
+        } catch (fluxError) {
+          console.warn('Enhanced FLUX failed, using Kandinsky:', fluxError);
+          
+          // Method 4: Fallback to Kandinsky
+          const prompt = createPromptFromVariation(variation, components, brandKit);
+          generatedImage = await generateWithKandinsky(prompt, components);
+        }
       }
     }
-    
-    throw new Error('No image was generated by the AI.');
+
+    // Apply AI enhancement pipeline to improve quality
+    console.log('Applying AI enhancement pipeline...');
+    const enhancedImage = await enhanceImage(generatedImage, {
+      upscale: true,
+      denoise: true,
+      sharpen: true,
+      colorCorrection: true
+    });
+
+    return enhancedImage;
 
   } catch (error) {
-    console.error('Error reconstructing LBL image with Gemini:', error);
-    throw new Error('Failed to reconstruct LBL image from AI.');
+    console.error('All image generation methods failed:', error);
+    throw new Error('Failed to generate high-quality LBL image. Please try again.');
   }
 };

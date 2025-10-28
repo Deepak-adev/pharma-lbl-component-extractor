@@ -17,16 +17,13 @@ interface LBLVariationsDisplayProps {
 const LBLVariationsDisplay: React.FC<LBLVariationsDisplayProps> = ({ variations, components, onReset, onReconstruct, reconstructingIndex, pageCount }) => {
   const getComponentById = (id: string) => components.find(c => c.id === id);
 
-  const handleDownload = (base64Html: string, title: string) => {
-    const htmlContent = atob(base64Html);
-    const blob = new Blob([htmlContent], { type: 'text/html' });
+  const handleDownload = (base64Image: string, title: string) => {
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${title.replace(/\s+/g, '_').toLowerCase()}_lbl.html`;
+    link.href = `data:image/png;base64,${base64Image}`;
+    link.download = `${title.replace(/\s+/g, '_').toLowerCase()}_lbl.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(link.href);
   };
 
   return (
@@ -59,11 +56,10 @@ const LBLVariationsDisplay: React.FC<LBLVariationsDisplayProps> = ({ variations,
                             </Button>
                         </div>
                         <div className="bg-base-100 p-4 rounded-lg shadow-inner">
-                            <iframe 
-                                srcDoc={atob(variation.reconstructedImage!)}
-                                title={`Reconstructed LBL for ${variation.title}`}
-                                className="w-full h-96 border border-base-300 rounded-md"
-                                sandbox="allow-same-origin"
+                            <img 
+                                src={`data:image/png;base64,${variation.reconstructedImage!}`}
+                                alt={`Reconstructed LBL for ${variation.title}`}
+                                className="w-full max-w-2xl mx-auto border border-base-300 rounded-md"
                             />
                         </div>
                     </div>
@@ -94,11 +90,21 @@ const LBLVariationsDisplay: React.FC<LBLVariationsDisplayProps> = ({ variations,
                                 size="large"
                             >
                                 {reconstructingIndex === index ? (
-                                    <><Spinner/> Reconstructing...</>
+                                    <><Spinner/> Generating High-Quality Image...</>
                                 ) : (
-                                    `Reconstruct Image`
+                                    `Generate High-Quality LBL`
                                 )}
                             </Button>
+                            {reconstructingIndex === index && (
+                                <div className="mt-4 text-center">
+                                    <div className="text-xs text-text-secondary mb-2">
+                                        AI Enhancement Pipeline: Generation → Restoration → Face Enhancement → Upscaling
+                                    </div>
+                                    <div className="w-full bg-base-300 rounded-full h-2 max-w-md mx-auto">
+                                        <div className="bg-brand-blue h-2 rounded-full animate-pulse" style={{width: '75%'}}></div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}

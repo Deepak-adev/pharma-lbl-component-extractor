@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { BrandKit } from '../types';
-import { fileToBase64 } from '../utils/fileUtils';
+import { fileToCompressedBase64 } from '../utils/imageUtils';
 import Modal from './ui/Modal';
 import Button from './ui/Button';
 
@@ -9,9 +9,15 @@ interface BrandKitModalProps {
   onClose: () => void;
   onSave: (brandKit: BrandKit) => void;
   initialBrandKit: BrandKit | null;
+  extractedColors?: {
+    primary: string;
+    secondary: string;
+    accent: string;
+    dominant: string[];
+  } | null;
 }
 
-const BrandKitModal: React.FC<BrandKitModalProps> = ({ isOpen, onClose, onSave, initialBrandKit }) => {
+const BrandKitModal: React.FC<BrandKitModalProps> = ({ isOpen, onClose, onSave, initialBrandKit, extractedColors }) => {
   const [primaryColor, setPrimaryColor] = useState('#0D47A1');
   const [secondaryColor, setSecondaryColor] = useState('#1976D2');
   const [font, setFont] = useState('Inter');
@@ -27,14 +33,18 @@ const BrandKitModal: React.FC<BrandKitModalProps> = ({ isOpen, onClose, onSave, 
       if (initialBrandKit.logo) {
         setLogoPreview(`data:${initialBrandKit.logo.mimeType};base64,${initialBrandKit.logo.base64}`);
       }
+    } else if (extractedColors && isOpen) {
+      // Auto-populate with extracted colors if no brand kit exists
+      setPrimaryColor(extractedColors.primary);
+      setSecondaryColor(extractedColors.secondary);
     }
-  }, [initialBrandKit, isOpen]);
+  }, [initialBrandKit, extractedColors, isOpen]);
 
   const handleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const base64 = await fileToBase64(file);
-      setLogo({ base64, mimeType: file.type });
+      const base64 = await fileToCompressedBase64(file);
+      setLogo({ base64, mimeType: 'image/jpeg' });
       setLogoPreview(URL.createObjectURL(file));
     }
   };
@@ -60,7 +70,28 @@ const BrandKitModal: React.FC<BrandKitModalProps> = ({ isOpen, onClose, onSave, 
       }
     >
       <div className="space-y-6">
-        <p className="text-sm text-text-secondary">Define your brand assets here. The AI will use these to generate on-brand LBL variations.</p>
+        <div>
+          <p className="text-sm text-text-secondary mb-3">Define your brand assets here. The AI will use these to generate on-brand LBL variations.</p>
+          {extractedColors && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h4 className="text-sm font-medium text-blue-900 mb-2">Colors extracted from your LBL:</h4>
+              <div className="flex gap-2 mb-2">
+                {extractedColors.dominant.slice(0, 5).map((color, idx) => (
+                  <div key={idx} className="flex flex-col items-center">
+                    <div 
+                      className="w-8 h-8 rounded border border-gray-300 cursor-pointer" 
+                      style={{ backgroundColor: color }}
+                      onClick={() => idx === 0 ? setPrimaryColor(color) : setSecondaryColor(color)}
+                      title={`Click to use as ${idx === 0 ? 'primary' : 'secondary'} color`}
+                    />
+                    <span className="text-xs text-gray-600 mt-1">{color}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-blue-700">Click colors above to use them in your brand kit</p>
+            </div>
+          )}
+        </div>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>

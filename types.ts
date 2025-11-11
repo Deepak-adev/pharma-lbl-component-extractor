@@ -36,6 +36,9 @@ export interface LBLVariation {
   description: string;
   orderedComponentIds: string[];
   reconstructedImage?: string;
+  reconstructedPages?: string[]; // Array of base64 images for each page
+  pageCount?: number;
+  lblType?: string;
 }
 
 export interface BrandKit {
@@ -46,4 +49,11 @@ export interface BrandKit {
   primaryColor: string;
   secondaryColor: string;
   font: string;
+}
+
+export interface ExtractedColors {
+  primary: string;
+  secondary: string;
+  accent: string;
+  dominant: string[];
 }

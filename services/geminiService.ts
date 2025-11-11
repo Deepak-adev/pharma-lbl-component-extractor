@@ -1,14 +1,22 @@
-import { GoogleGenAI, GenerateContentResponse, Type, Modality } from '@google/genai';
+import { GoogleGenAI, Type, Modality } from '@google/genai';
 import type { ImageComponent, ComponentCategory, LBLVariation, BrandKit } from '../types';
 import { componentCategories } from '../types';
-import { generateWithKandinsky, createPromptFromVariation } from './imageGenerationService';
-import { enhanceImage, generateHighQualityImage, generateWithSDXL } from './imageEnhancementService';
-import * as fs from "node:fs";
 
+const FREE_GEMINI_KEY = import.meta.env.VITE_GEMINI_FREE_KEY || 'AIzaSyDhSh4A6_F-C5t5ca2fzJjOh0lWJQ9A9j0';
+const PAID_GEMINI_KEY = import.meta.env.VITE_GEMINI_PAID_KEY || 'AIzaSyDhSh4A6_F-C5t5ca2fzJjOh0lWJQ9A9j0';
 
 const CATEGORIES: readonly ComponentCategory[] = componentCategories;
 
-export const analyzeAndCategorizeImage = async (ai: GoogleGenAI, base64: string, mimeType: string): Promise<Omit<ImageComponent, 'id' | 'base64' | 'mimeType'>[]> => {
+export interface LBLGenerationOptions {
+  theme: 'professional' | 'modern' | 'clinical' | 'patient-friendly' | 'premium';
+  colorScheme: 'blue' | 'green' | 'red' | 'purple' | 'custom';
+  layout: 'grid' | 'flowing' | 'minimal' | 'detailed';
+  customPrompt?: string;
+}
+
+export const analyzeAndCategorizeImage = async (base64: string, mimeType: string): Promise<Omit<ImageComponent, 'id' | 'base64' | 'mimeType'>[]> => {
+    const ai = new GoogleGenAI({ apiKey: FREE_GEMINI_KEY });
+    
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
@@ -21,11 +29,29 @@ export const analyzeAndCategorizeImage = async (ai: GoogleGenAI, base64: string,
                         },
                     },
                     {
-                        text: `As an Indian Pharmaceutical Marketing Expert, analyze this image from a piece of marketing material (LBL). Identify distinct visual components within it. For each component, provide a short, descriptive "name", a brief "description" of its content and marketing purpose, and a "category". Return a JSON array of objects.
+                        text: `ULTRA-PRECISE PHARMACEUTICAL COMPONENT EXTRACTION
                         
-                        The category must be one of the following: ${CATEGORIES.join(', ')}.
+                        COMPUTER VISION ANALYSIS:
+                        1. Detect ALL visual containers, boxes, frames, boundaries
+                        2. Identify complete design elements WITH backgrounds
+                        3. Find text blocks WITH complete containers (boxes, backgrounds, borders)
+                        4. Locate images WITH frames and surrounding space
+                        5. Map visual hierarchy and containment relationships
                         
-                        Consider the context of visuals used in Indian medical marketing. For example, differentiate between a generic lifestyle image and one specifically tailored to an Indian audience. If no clear, distinct marketing components are found, return an empty array.`
+                        BOUNDARY PRECISION RULES:
+                        - If text has background/box → include ENTIRE background area
+                        - If element has borders → include borders + padding + margins
+                        - If element has shadows → include shadow area
+                        - If multiple elements form group → capture group boundary
+                        - Expand boundaries by 8% to ensure completeness
+                        
+                        For each component:
+                        1. "name": descriptive identifier
+                        2. "description": complete visual content + design elements
+                        3. "category": ${CATEGORIES.join(', ')}
+                        4. "boundingBox": EXPANDED coordinates {x, y, width, height} as percentages
+                        
+                        CRITICAL: Boundaries must capture 100% of visual elements.`
                     }
                 ]
             },
@@ -39,56 +65,69 @@ export const analyzeAndCategorizeImage = async (ai: GoogleGenAI, base64: string,
                             name: { type: Type.STRING },
                             description: { type: Type.STRING },
                             category: { type: Type.STRING, enum: [...CATEGORIES] },
+                            boundingBox: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    x: { type: Type.NUMBER },
+                                    y: { type: Type.NUMBER },
+                                    width: { type: Type.NUMBER },
+                                    height: { type: Type.NUMBER }
+                                },
+                                required: ["x", "y", "width", "height"]
+                            }
                         },
-                        required: ["name", "description", "category"]
+                        required: ["name", "description", "category", "boundingBox"]
                     }
                 }
             }
         });
 
-        const jsonString = response.text.trim();
-        const result = JSON.parse(jsonString);
+        const result = JSON.parse(response.text.trim());
         return result as Omit<ImageComponent, 'id' | 'base64' | 'mimeType'>[];
 
     } catch (error) {
-        console.error('Error analyzing image with Gemini:', error);
-        return []; // Return empty array on failure to avoid crashing the process
+        console.error('Error analyzing image:', error);
+        throw new Error(`Failed to analyze image with AI. Details: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 };
 
-export const generateLBLVariations = async (ai: GoogleGenAI, components: ImageComponent[], pageCount: number, brandKit?: BrandKit): Promise<LBLVariation[]> => {
+export const generateLBLVariations = async (
+  components: ImageComponent[], 
+  pageCount: number, 
+  options: LBLGenerationOptions, 
+  brandKit?: BrandKit,
+  extractedColors?: { primary: string; secondary: string; accent: string; dominant: string[] }
+): Promise<LBLVariation[]> => {
+    const ai = new GoogleGenAI({ apiKey: PAID_GEMINI_KEY });
+    
     const componentDetails = components.map(c => `- ID: ${c.id}, Name: ${c.name}, Category: ${c.category}, Description: ${c.description}`).join('\n');
     
-    let brandInstructions = '';
-    if (brandKit) {
-        brandInstructions = `
-        Crucially, all layout concepts must adhere to the following brand guidelines:
-        - Primary Color: ${brandKit.primaryColor}
-        - Secondary Color: ${brandKit.secondaryColor}
-        - Font Style: A professional and clean font, similar to ${brandKit.font}.
-        - The overall tone should be consistent with a premium, trustworthy pharmaceutical brand.
-        `;
-    }
-
     const prompt = `
-    Acting as a senior marketing strategist for a top Indian pharma company, create 5 distinct layout variations for a new ${pageCount}-page LBL using the following components:
-    ${componentDetails}
-
-    Consider different marketing goals for each variation:
-    - One focused on launching a new product (high-impact visuals).
-    - One for reinforcing clinical data (data-driven, professional).
-    - One for patient education (simple, clear, and reassuring).
-    - One for a conference giveaway (visually engaging, key messages).
-    - A creative, out-of-the-box option.
+    Create 3 pharmaceutical LBL variations using the provided components.
     
-    ${brandInstructions}
-
-    For each of the 5 variations, provide:
-    1. A "title" that reflects its strategic marketing goal (e.g., 'Clinical Data-Driven Layout').
-    2. A "description" of the layout concept and page-by-page content flow strategy.
-    3. An "orderedComponentIds" array that lists the component IDs in the suggested order of appearance. Use the provided component IDs only. Try to use all selected components across the pages.
-
-    The output must be a valid JSON array of 5 objects, each conforming to this structure.
+    Available Components:
+    ${componentDetails}
+    
+    REQUIREMENTS:
+    - ${pageCount}-page pharmaceutical marketing materials
+    - Professional medical design standards for ${pageCount} pages
+    - Use ALL provided components distributed across ${pageCount} pages
+    - Proper pharmaceutical terminology and spelling
+    - Include clinical data and regulatory information
+    - Plan content flow across ${pageCount} pages with logical progression
+    
+    Generate these 3 variations:
+    1. Clinical Focus - Emphasize medical data and efficacy across ${pageCount} pages
+    2. Patient Education - Clear, accessible information for patients over ${pageCount} pages
+    3. Professional Detail - Comprehensive information for healthcare providers in ${pageCount} pages
+    
+    Each variation must include:
+    - Professional title indicating ${pageCount}-page format
+    - Detailed description of the multi-page layout approach
+    - orderedComponentIds array containing ALL component IDs
+    - Page flow strategy for ${pageCount} pages
+    
+    Custom Instructions: ${options.customPrompt || `Standard ${pageCount}-page pharmaceutical design`}
     `;
 
     try {
@@ -110,145 +149,149 @@ export const generateLBLVariations = async (ai: GoogleGenAI, components: ImageCo
                             }
                         },
                         required: ["title", "description", "orderedComponentIds"]
-                    }
+                    },
+                    minItems: 3,
+                    maxItems: 3
                 }
             }
         });
 
-        const jsonString = response.text.trim();
-        const result = JSON.parse(jsonString);
-        return result as LBLVariation[];
+        const result = JSON.parse(response.text.trim());
+        const allComponentIds = components.map(c => c.id);
+        return result.map((variation: LBLVariation) => ({
+            ...variation,
+            orderedComponentIds: allComponentIds
+        })) as LBLVariation[];
     } catch (error) {
-        console.error('Error generating LBL variations with Gemini:', error);
-        throw new Error('Failed to generate LBL variations from AI.');
+        console.error('Error generating LBL variations:', error);
+        throw new Error(`Failed to generate LBL variations. Details: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 };
 
+export const generateSinglePage = async (
+  variation: LBLVariation,
+  components: ImageComponent[],
+  pageNumber: number,
+  totalPages: number,
+  options: LBLGenerationOptions,
+  brandKit?: BrandKit,
+  originalImage?: string,
+  extractedColors?: { primary: string; secondary: string; accent: string; dominant: string[] }
+): Promise<string> => {
+  const ai = new GoogleGenAI({ apiKey: PAID_GEMINI_KEY });
+
+  const pageType = pageNumber === 1 ? 'Cover/Introduction' : 
+                   pageNumber === totalPages ? 'Summary/Regulatory' : 
+                   'Content/Clinical Data';
+
+  const parts: any[] = [
+    {
+      text: `Create page ${pageNumber} of ${totalPages} for a professional pharmaceutical marketing material.
+      
+      PAGE TYPE: ${pageType}
+      REQUIREMENTS:
+      - Single page design (page ${pageNumber} of ${totalPages})
+      - Professional pharmaceutical layout
+      - Use relevant components for this page type
+      - Maintain consistent branding across pages
+      
+      Title: "${variation.title}"
+      Description: "${variation.description}"
+      
+      PAGE-SPECIFIC INSTRUCTIONS:
+      ${pageNumber === 1 ? 
+        '- Cover page with main branding, product name, key message\n- Include logo prominently\n- Eye-catching design to grab attention' :
+        pageNumber === totalPages ?
+        '- Summary page with regulatory information\n- Contact details and disclaimers\n- Safety information and warnings' :
+        '- Content page with clinical data and product details\n- Charts, graphs, and detailed information\n- Professional medical content'}
+      `,
+    },
+  ];
+
+  if (brandKit?.logo) {
+    parts.push({
+      inlineData: {
+        data: brandKit.logo.base64,
+        mimeType: brandKit.logo.mimeType,
+      },
+    });
+    parts.push({ text: `Brand Logo - ${pageNumber === 1 ? 'use prominently on cover' : 'include as header/footer element'}` });
+  }
+
+  if (originalImage) {
+    parts.push({
+      inlineData: {
+        data: originalImage,
+        mimeType: 'image/jpeg',
+      },
+    });
+    parts.push({ text: `REFERENCE STYLE: Use this as style guide for page ${pageNumber}` });
+  }
+
+  const componentsPerPage = Math.ceil(components.length / totalPages);
+  const startIndex = (pageNumber - 1) * componentsPerPage;
+  const endIndex = Math.min(startIndex + componentsPerPage, components.length);
+  const pageComponents = components.slice(startIndex, endIndex);
+
+  pageComponents.forEach((component, index) => {
+    parts.push({
+      inlineData: {
+        data: component.base64,
+        mimeType: component.mimeType,
+      },
+    });
+    parts.push({ 
+      text: `COMPONENT: ${component.name} (${component.category}) - Include in page ${pageNumber} layout` 
+    });
+  });
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: { parts },
+      config: {
+        responseModalities: [Modality.IMAGE],
+      },
+    });
+
+    for (const part of response.candidates[0].content.parts) {
+      if (part.inlineData) {
+        return part.inlineData.data;
+      }
+    }
+    
+    throw new Error(`No image generated for page ${pageNumber}`);
+
+  } catch (error) {
+    console.error(`Error generating page ${pageNumber}:`, error);
+    throw new Error(`Failed to generate page ${pageNumber}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+};
+
 export const reconstructLBLImage = async (
-  ai: GoogleGenAI,
   variation: LBLVariation,
   components: ImageComponent[],
   pageCount: number,
-  brandKit?: BrandKit
-): Promise<string> => {
-  let generatedImage: string;
-
-  // Try multiple high-quality generation methods
-  try {
-    // Method 1: Try Gemini first
-    try {
-      let brandInstructions = 'The design should be clean, modern, and professional.';
-      if (brandKit) {
-          brandInstructions = `
-          The design must adhere to strict brand guidelines:
-          - The primary brand color is ${brandKit.primaryColor}. Use it for headlines, key accents, and backgrounds where appropriate.
-          - The secondary brand color is ${brandKit.secondaryColor}. Use it for secondary elements, call-outs, or subtle highlights.
-          - The overall typography should be clean and professional, reflecting a font like ${brandKit.font}.
-          - The provided brand logo must be placed appropriately, usually at the top or bottom corner, to ensure brand presence.
-          `;
-      }
-
-      const parts: any[] = [
-        {
-          text: `Create a HIGH-QUALITY professional pharmaceutical Leave Behind Literature (LBL) design. This is a medical marketing brochure for doctors, NOT a poster or general advertisement.
-          
-          CRITICAL REQUIREMENTS:
-          - Medical/pharmaceutical industry standard layout
-          - Professional typography with medical credibility
-          - Clean white/light background with subtle medical blue accents
-          - Product information hierarchy: Brand name → Indication → Key benefits → Clinical data
-          - Regulatory compliance visual style
-          - Doctor-facing professional tone
-          - SHARP, HIGH-RESOLUTION, PROFESSIONAL QUALITY
-          
-          Layout: "${variation.title}"
-          Strategy: "${variation.description}"
-          Pages: ${pageCount}
-          
-          ${brandInstructions}
-          
-          Create a single composite image showing the LBL layout with pharmaceutical industry standards - clean, trustworthy, medical-grade design quality.`,
-        },
-      ];
-
-      if (brandKit?.logo) {
-        parts.push({
-          inlineData: {
-            data: brandKit.logo.base64,
-            mimeType: brandKit.logo.mimeType,
-          },
-        });
-        parts.push({ text: `This is the official Brand Logo. Incorporate it into the design.` });
-      }
-
-      components.forEach(component => {
-        parts.push({
-          inlineData: {
-            data: component.base64,
-            mimeType: component.mimeType,
-          },
-        });
-        parts.push({ text: `Component to include: ${component.name} (${component.category})` });
-      });
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: { parts },
-        config: {
-          responseModalities: [Modality.IMAGE],
-        },
-      });
-
-      if (response.candidates?.[0]?.content?.parts) {
-        for (const part of response.candidates[0].content.parts) {
-          if (part.inlineData?.data) {
-            generatedImage = part.inlineData.data;
-            break;
-          }
-        }
-      }
-      
-      if (!generatedImage) {
-        throw new Error('No image data in Gemini response');
-      }
-
-    } catch (geminiError) {
-      console.warn('Gemini failed, trying SDXL:', geminiError);
-      
-      // Method 2: Try Stable Diffusion XL
-      try {
-        const prompt = createPromptFromVariation(variation, components, brandKit);
-        generatedImage = await generateWithSDXL(prompt);
-      } catch (sdxlError) {
-        console.warn('SDXL failed, trying enhanced FLUX:', sdxlError);
-        
-        // Method 3: Try enhanced FLUX.1-dev
-        try {
-          const prompt = createPromptFromVariation(variation, components, brandKit);
-          generatedImage = await generateHighQualityImage(prompt, 1024, 768);
-        } catch (fluxError) {
-          console.warn('Enhanced FLUX failed, using Kandinsky:', fluxError);
-          
-          // Method 4: Fallback to Kandinsky
-          const prompt = createPromptFromVariation(variation, components, brandKit);
-          generatedImage = await generateWithKandinsky(prompt, components);
-        }
-      }
-    }
-
-    // Apply AI enhancement pipeline to improve quality
-    console.log('Applying AI enhancement pipeline...');
-    const enhancedImage = await enhanceImage(generatedImage, {
-      upscale: true,
-      denoise: true,
-      sharpen: true,
-      colorCorrection: true
-    });
-
-    return enhancedImage;
-
-  } catch (error) {
-    console.error('All image generation methods failed:', error);
-    throw new Error('Failed to generate high-quality LBL image. Please try again.');
+  options: LBLGenerationOptions,
+  brandKit?: BrandKit,
+  originalImage?: string,
+  extractedColors?: { primary: string; secondary: string; accent: string; dominant: string[] }
+): Promise<string[]> => {
+  const pages: string[] = [];
+  
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+    const pageImage = await generateSinglePage(
+      variation,
+      components,
+      pageNumber,
+      pageCount,
+      options,
+      brandKit,
+      originalImage,
+      extractedColors
+    );
+    pages.push(pageImage);
   }
+  
+  return pages;
 };

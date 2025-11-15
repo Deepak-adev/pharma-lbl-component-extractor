@@ -1,6 +1,3 @@
-import { advancedExtract, type PharmaLabelData } from './advancedExtraction';
-
-// Legacy grid-based extraction for fallback
 export const quickExtract = (base64: string): Promise<string[]> => {
   return new Promise((resolve) => {
     const img = new Image();
@@ -8,6 +5,13 @@ export const quickExtract = (base64: string): Promise<string[]> => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d')!;
       
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+      
+      const components: string[] = [];
+      
+      // Resize image first to reduce size
       const maxSize = 400;
       let { width, height } = img;
       if (width > maxSize || height > maxSize) {
@@ -20,6 +24,7 @@ export const quickExtract = (base64: string): Promise<string[]> => {
       canvas.height = height;
       ctx.drawImage(img, 0, 0, width, height);
       
+      // Quick 2x2 grid extraction
       const regions = [
         { x: 0, y: 0, w: width/2, h: height/2 },
         { x: width/2, y: 0, w: width/2, h: height/2 },
@@ -27,13 +32,13 @@ export const quickExtract = (base64: string): Promise<string[]> => {
         { x: width/2, y: height/2, w: width/2, h: height/2 }
       ];
       
-      const components: string[] = [];
       for (const region of regions) {
         const regionCanvas = document.createElement('canvas');
         const regionCtx = regionCanvas.getContext('2d')!;
         
         regionCanvas.width = region.w;
         regionCanvas.height = region.h;
+        
         regionCtx.drawImage(canvas, region.x, region.y, region.w, region.h, 0, 0, region.w, region.h);
         
         const base64Result = regionCanvas.toDataURL('image/jpeg', 0.3);
@@ -44,18 +49,4 @@ export const quickExtract = (base64: string): Promise<string[]> => {
     };
     img.src = `data:image/jpeg;base64,${base64}`;
   });
-};
-
-// Enterprise-grade extraction using the unified pipeline
-export const enterpriseExtract = async (base64: string, apiKey?: string): Promise<PharmaLabelData | string[]> => {
-  if (!apiKey) {
-    return quickExtract(base64);
-  }
-  
-  try {
-    return await advancedExtract(base64, apiKey);
-  } catch (error) {
-    console.warn('Advanced extraction failed, falling back to grid extraction:', error);
-    return quickExtract(base64);
-  }
 };

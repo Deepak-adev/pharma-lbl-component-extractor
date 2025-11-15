@@ -5,6 +5,7 @@ import Button from './ui/Button';
 import Spinner from './ui/Spinner';
 import { ArrowRightIcon, DownloadIcon, DownloadAllIcon, EditIcon, TrashIcon } from './ui/Icons';
 import { LBLReconstructionEditor } from './LBLReconstructionEditor';
+import { downloadPagesAsPDF, downloadSinglePageAsPDF } from '../utils/pdfUtils';
 
 interface LBLVariationsDisplayProps {
   variations: LBLVariation[];
@@ -36,6 +37,18 @@ const LBLVariationsDisplay: React.FC<LBLVariationsDisplayProps> = ({ variations,
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleDownloadPDF = (variation: LBLVariation) => {
+    if (variation.reconstructedPages) {
+      downloadPagesAsPDF(variation.reconstructedPages, variation.title);
+    } else if (variation.reconstructedImage) {
+      downloadSinglePageAsPDF(variation.reconstructedImage, variation.title, 1);
+    }
+  };
+
+  const handleDownloadPagePDF = (pageBase64: string, title: string, pageNumber: number) => {
+    downloadSinglePageAsPDF(pageBase64, title, pageNumber);
   };
 
   const handleDownloadAll = () => {
@@ -181,7 +194,14 @@ const LBLVariationsDisplay: React.FC<LBLVariationsDisplayProps> = ({ variations,
                                     size="small"
                                 >
                                     <DownloadIcon className="w-4 h-4" />
-                                    Download
+                                    PNG
+                                </Button>
+                                <Button 
+                                    onClick={() => handleDownloadPDF(variation)}
+                                    variant="secondary"
+                                    size="small"
+                                >
+                                    📄 PDF
                                 </Button>
                                 {onSaveLBL && (
                                     <Button 
@@ -202,9 +222,16 @@ const LBLVariationsDisplay: React.FC<LBLVariationsDisplayProps> = ({ variations,
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         {variation.reconstructedPages.map((pageImage, pageIndex) => (
-                                            <div key={pageIndex} className="border border-base-300 rounded-md overflow-hidden">
-                                                <div className="bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600">
-                                                    Page {pageIndex + 1}
+                                            <div key={pageIndex} className="border border-base-300 rounded-md overflow-hidden group">
+                                                <div className="bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600 flex justify-between items-center">
+                                                    <span>Page {pageIndex + 1}</span>
+                                                    <button
+                                                        onClick={() => handleDownloadPagePDF(pageImage, variation.title, pageIndex + 1)}
+                                                        className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-600 hover:text-blue-800"
+                                                        title="Download this page as PDF"
+                                                    >
+                                                        📄
+                                                    </button>
                                                 </div>
                                                 <img 
                                                     src={`data:image/png;base64,${pageImage}`}

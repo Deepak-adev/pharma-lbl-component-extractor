@@ -29,29 +29,51 @@ export const analyzeAndCategorizeImage = async (base64: string, mimeType: string
                         },
                     },
                     {
-                        text: `ULTRA-PRECISE PHARMACEUTICAL COMPONENT EXTRACTION
-                        
-                        COMPUTER VISION ANALYSIS:
-                        1. Detect ALL visual containers, boxes, frames, boundaries
-                        2. Identify complete design elements WITH backgrounds
-                        3. Find text blocks WITH complete containers (boxes, backgrounds, borders)
-                        4. Locate images WITH frames and surrounding space
-                        5. Map visual hierarchy and containment relationships
-                        
-                        BOUNDARY PRECISION RULES:
-                        - If text has background/box → include ENTIRE background area
-                        - If element has borders → include borders + padding + margins
-                        - If element has shadows → include shadow area
-                        - If multiple elements form group → capture group boundary
-                        - Expand boundaries by 8% to ensure completeness
-                        
-                        For each component:
-                        1. "name": descriptive identifier
-                        2. "description": complete visual content + design elements
-                        3. "category": ${CATEGORIES.join(', ')}
-                        4. "boundingBox": EXPANDED coordinates {x, y, width, height} as percentages
-                        
-                        CRITICAL: Boundaries must capture 100% of visual elements.`
+                        text: `PHARMACEUTICAL COMPONENT EXTRACTION - COMPREHENSIVE ANALYSIS
+
+                        Analyze this pharmaceutical marketing material and extract ALL visible components with maximum precision.
+
+                        DETECTION REQUIREMENTS:
+                        - Find 10-20 distinct components (extract everything visible)
+                        - Include text blocks, images, logos, charts, tables, icons, backgrounds
+                        - Detect overlapping elements separately
+                        - Identify small details like regulatory text, disclaimers, contact info
+                        - Find decorative elements, borders, and design components
+
+                        COMPONENT CATEGORIES: ${CATEGORIES.join(', ')}
+
+                        BOUNDING BOX PRECISION:
+                        - Use percentage coordinates (0-100) for x, y, width, height
+                        - Ensure complete content capture (don't cut off text/images)
+                        - Add 2-3% padding around each component for safety
+                        - For text: capture full lines including line spacing
+                        - For images: include any borders or shadows
+                        - For logos: include surrounding whitespace
+
+                        COMPONENT TYPES TO FIND:
+                        1. HEADERS & TITLES: Main headlines, product names, section titles
+                        2. BODY TEXT: Paragraphs, descriptions, bullet points, captions
+                        3. REGULATORY TEXT: Disclaimers, warnings, legal text, fine print
+                        4. PRODUCT IMAGES: Main product shots, supporting visuals, lifestyle images
+                        5. LOGOS & BRANDING: Company logos, product logos, certification marks
+                        6. DATA ELEMENTS: Charts, graphs, tables, statistics, comparisons
+                        7. ICONS & SYMBOLS: Feature icons, benefit symbols, navigation elements
+                        8. CONTACT INFO: Phone numbers, websites, addresses, QR codes
+                        9. DECORATIVE ELEMENTS: Borders, backgrounds, design flourishes
+                        10. CALL-TO-ACTION: Buttons, highlighted text, action prompts
+
+                        OUTPUT FORMAT:
+                        For each component provide:
+                        - "name": Specific descriptive name (e.g., "Main Product Headline", "Efficacy Data Chart")
+                        - "description": Detailed description of content and purpose
+                        - "category": Exact category from the provided list
+                        - "boundingBox": Precise coordinates with padding for complete capture
+
+                        QUALITY STANDARDS:
+                        - Prioritize completeness over speed
+                        - Ensure no visible element is missed
+                        - Verify bounding boxes capture complete content
+                        - Use specific, descriptive names for each component`
                     }
                 ]
             },
@@ -180,9 +202,9 @@ export const generateSinglePage = async (
 ): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: PAID_GEMINI_KEY });
 
-  const pageType = pageNumber === 1 ? 'Cover/Introduction' : 
-                   pageNumber === totalPages ? 'Summary/Regulatory' : 
-                   'Content/Clinical Data';
+  const pageType = pageNumber === 1 ? 'Front Cover' : 
+                   pageNumber === totalPages ? 'Back Cover' : 
+                   'Content Page';
 
   const parts: any[] = [
     {
@@ -191,19 +213,21 @@ export const generateSinglePage = async (
       PAGE TYPE: ${pageType}
       REQUIREMENTS:
       - Single page design (page ${pageNumber} of ${totalPages})
+      - CONSISTENT SIZE: 8.5x11 inches (US Letter) at 300 DPI
       - Professional pharmaceutical layout
       - Use relevant components for this page type
       - Maintain consistent branding across pages
+      - EXACT DIMENSIONS: 2550x3300 pixels for high quality
       
       Title: "${variation.title}"
       Description: "${variation.description}"
       
       PAGE-SPECIFIC INSTRUCTIONS:
       ${pageNumber === 1 ? 
-        '- Cover page with main branding, product name, key message\n- Include logo prominently\n- Eye-catching design to grab attention' :
+        '- FRONT COVER: Main branding, product name, key visual\n- Include logo prominently\n- Eye-catching pharmaceutical design' :
         pageNumber === totalPages ?
-        '- Summary page with regulatory information\n- Contact details and disclaimers\n- Safety information and warnings' :
-        '- Content page with clinical data and product details\n- Charts, graphs, and detailed information\n- Professional medical content'}
+        '- BACK COVER: Regulatory information and disclaimers\n- Contact details and company info\n- Safety warnings and legal text' :
+        `- CONTENT PAGE ${pageNumber - 1}: Clinical data and product details\n- Charts, graphs, and detailed information\n- Professional medical content for page ${pageNumber - 1} of ${totalPages - 2}`}
       `,
     },
   ];
@@ -228,10 +252,33 @@ export const generateSinglePage = async (
     parts.push({ text: `REFERENCE STYLE: Use this as style guide for page ${pageNumber}` });
   }
 
-  const componentsPerPage = Math.ceil(components.length / totalPages);
-  const startIndex = (pageNumber - 1) * componentsPerPage;
-  const endIndex = Math.min(startIndex + componentsPerPage, components.length);
-  const pageComponents = components.slice(startIndex, endIndex);
+  let pageComponents: ImageComponent[] = [];
+  
+  if (pageNumber === 1) {
+    // Front cover: Use branding components
+    pageComponents = components.filter(c => 
+      c.category === 'Brand Logo' || 
+      c.category === 'Product Image (Packshot)' ||
+      c.category === 'Key Feature Icon'
+    ).slice(0, 3);
+  } else if (pageNumber === totalPages) {
+    // Back cover: Use regulatory components
+    pageComponents = components.filter(c => 
+      c.category === 'Regulatory Text Block' ||
+      c.category === 'Header/Footer Element'
+    ).slice(0, 2);
+  } else {
+    // Content pages: Distribute remaining components
+    const contentPages = totalPages - 2;
+    const contentComponents = components.filter(c => 
+      !['Brand Logo', 'Regulatory Text Block', 'Header/Footer Element'].includes(c.category)
+    );
+    const componentsPerPage = Math.ceil(contentComponents.length / contentPages);
+    const contentPageIndex = pageNumber - 2;
+    const startIndex = contentPageIndex * componentsPerPage;
+    const endIndex = Math.min(startIndex + componentsPerPage, contentComponents.length);
+    pageComponents = contentComponents.slice(startIndex, endIndex);
+  }
 
   pageComponents.forEach((component, index) => {
     parts.push({
@@ -278,13 +325,14 @@ export const reconstructLBLImage = async (
   extractedColors?: { primary: string; secondary: string; accent: string; dominant: string[] }
 ): Promise<string[]> => {
   const pages: string[] = [];
+  const totalPages = pageCount + 2; // Add 2 extra pages (first + last)
   
-  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+  for (let pageNumber = 1; pageNumber <= totalPages; pageNumber++) {
     const pageImage = await generateSinglePage(
       variation,
       components,
       pageNumber,
-      pageCount,
+      totalPages,
       options,
       brandKit,
       originalImage,
@@ -295,3 +343,4 @@ export const reconstructLBLImage = async (
   
   return pages;
 };
+

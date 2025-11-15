@@ -5,6 +5,51 @@ export interface CropBoundingBox {
   height: number;
 }
 
+// Simple reliable cropping function
+export const cropRegionSimple = (base64Image: string, boundingBox: CropBoundingBox): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      if (!ctx) {
+        reject(new Error('Failed to get canvas context'));
+        return;
+      }
+      
+      const { x, y, width, height } = boundingBox;
+      
+      // Convert percentages to pixels with validation
+      const cropX = Math.max(0, (x / 100) * img.width);
+      const cropY = Math.max(0, (y / 100) * img.height);
+      const cropWidth = Math.min(img.width - cropX, (width / 100) * img.width);
+      const cropHeight = Math.min(img.height - cropY, (height / 100) * img.height);
+      
+      // Ensure minimum dimensions
+      if (cropWidth < 10 || cropHeight < 10) {
+        resolve(base64Image); // Return original if crop too small
+        return;
+      }
+      
+      canvas.width = cropWidth;
+      canvas.height = cropHeight;
+      
+      ctx.drawImage(
+        img,
+        cropX, cropY, cropWidth, cropHeight,
+        0, 0, cropWidth, cropHeight
+      );
+      
+      const croppedBase64 = canvas.toDataURL('image/jpeg', 0.85);
+      resolve(croppedBase64.split(',')[1]);
+    };
+    
+    img.onerror = () => reject(new Error('Failed to load image for cropping'));
+    img.src = `data:image/jpeg;base64,${base64Image}`;
+  });
+};
+
 export interface EnhancementOptions {
   brightness?: number;
   contrast?: number;
